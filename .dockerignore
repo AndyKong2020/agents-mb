@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!mb
+!payload.py
+!server.py
+!sync_client.py
+!sync_server.py
+!pb_migrations/
+!pb_migrations/*.js

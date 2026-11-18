@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+accounts.json
+pb_data/
+data/
+workspaces/
+board-cache/
+dist/

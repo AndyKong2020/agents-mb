@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Client for the experiment board. Uses only the Python standard library."""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+
+from payload import validate_payload
+from sync_client import pull, push
+
+
+class Board:
+    def __init__(self):
+        self.url = os.environ["MB_URL"].rstrip("/")
+        self.rank = int(os.environ["MB_RANK"])
+        self.token = self.api("POST", "/login", {
+            "rank": self.rank, "password": os.environ["MB_PASSWORD"],
+        })["token"]
+
+    def api(self, method, path, data=None, query=None):
+        headers = {"Content-Type": "application/json"}
+        if hasattr(self, "token"):
+            headers["Authorization"] = "Bearer " + self.token
+        qs = urlencode({k: v for k, v in (query or {}).items() if v is not None})
+        if qs:
+            path += "?" + qs
+        req = Request(self.url + path, method=method, headers=headers,
+                      data=None if data is None else json.dumps(data).encode())
+        try:
+            with urlopen(req, timeout=60) as response:
+                body = response.read()
+        except HTTPError as exc:
+            try:
+                detail = json.loads(exc.read())
+                reason = detail.get("message") or detail.get("error") or exc.reason
+            except (ValueError, AttributeError):
+                reason = exc.reason
+            raise RuntimeError(f"{method} {path}: HTTP {exc.code} {reason}") from exc
+        return json.loads(body) if body else None
+
+    def ranked_ids(self):
+        cursor = None
+        ranks = []
+        while True:
+            page = self.api("GET", "/rank", query={"cursor": cursor})
+            ranks.extend(row["rank"] for row in page["items"])
+            cursor = page.get("next_cursor")
+            if not cursor:
+                return list(dict.fromkeys(ranks))
+
+
+def arguments():
+    parser = argparse.ArgumentParser(prog="mb")
+    commands = parser.add_subparsers(dest="command", required=True)
+    publish = commands.add_parser("publish")
+    publish.add_argument("round")
+    publish.add_argument("--json", required=True, metavar="PAYLOAD",
+                         help="JSON object, or - to read standard input")
+    commands.add_parser("retract").add_argument("round")
+    rank = commands.add_parser("rank")
+    posts = commands.add_parser("posts")
+    posts.add_argument("rank", type=int)
+    posts.add_argument("round", nargs="?")
+    for listing in (rank, posts):
+        listing.add_argument("--limit", type=int)
+        listing.add_argument("--cursor")
+    sync = commands.add_parser("sync").add_subparsers(dest="action", required=True)
+    sync.add_parser("push")
+    sync.add_parser("pull").add_argument("rank", nargs="?", type=int)
+    return parser.parse_args()
+
+
+def emit(obj):
+    print(json.dumps(obj, ensure_ascii=False))
+
+
+def main():
+    args = arguments()
+    if args.command == "publish":
+        payload = json.loads(sys.stdin.read() if args.json == "-" else args.json)
+        validate_payload(payload)
+
+    board = Board()
+    workspace = Path(os.getenv("MB_WORKSPACE", "/workspace"))
+    cache = Path(os.getenv("MB_CACHE_DIR", "/board-cache"))
+    if args.command == "publish":
+        push(board.url, board.token, board.rank, workspace, cache)
+        emit(board.api("POST", "/posts/" + quote(args.round, safe=""), payload))
+    elif args.command == "retract":
+        board.api("DELETE", "/posts/" + quote(args.round, safe=""))
+    elif args.command == "rank" or args.command == "posts":
+        path = "/rank" if args.command == "rank" else f"/posts/{args.rank}"
+        if args.command == "posts" and args.round is not None:
+            path += "/" + quote(args.round, safe="")
+        emit(board.api("GET", path, query={"limit": args.limit, "cursor": args.cursor}))
+    elif args.action == "push":
+        push(board.url, board.token, board.rank, workspace, cache)
+    else:
+        ranks = [args.rank] if args.rank is not None else board.ranked_ids()
+        results = []
+        failed = False
+        for rank in ranks:
+            try:
+                pull(board.url, board.token, rank, workspace, cache)
+                results.append({"rank": rank, "local_path": str(cache / str(rank))})
+            except (OSError, ValueError, RuntimeError) as exc:
+                results.append({"rank": rank, "error": str(exc)})
+                failed = True
+        emit({"items": results})
+        return int(failed)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (ValueError, KeyError, OSError, RuntimeError) as exc:
+        print(f"mb: {exc}", file=sys.stderr)
+        sys.exit(1)
