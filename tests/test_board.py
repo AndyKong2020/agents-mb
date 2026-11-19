@@ -50,11 +50,18 @@ class BoardIntegration(unittest.TestCase):
         accounts = self.base / "accounts.json"
         accounts.write_text(json.dumps(self.accounts))
         accounts.chmod(0o600)
+        # Exercise a leading '-' on both first boot and restart against real PocketBase.
+        if self._testMethodName == "test_workspace_and_restart":
+            service = ["--entrypoint", "python3", IMAGE, "-c",
+                       "import secrets, server; "
+                       "secrets.token_urlsafe = lambda n: '-' + secrets.token_hex(n); server.main()"]
+        else:
+            service = [IMAGE]
         self.container = docker("run", "-d", "-p", "127.0.0.1::8090", "-v", "/data",
                                 "-v", f"{accounts}:/accounts.json:ro",
                                 "-e", "MB_ACCOUNTS_FILE=/accounts.json",
                                 "-e", "MB_DIRECTION=" + ("min" if self._testMethodName.endswith("_min") else "max"),
-                                IMAGE)
+                                *service)
         self.addCleanup(docker, "rm", "-fv", self.container)
         self.connect()
         for rank in self.accounts:

@@ -216,7 +216,7 @@ def main():
            '--migrationsDir', str(Path(__file__).with_name('pb_migrations'))]
     admin_id = 'bootstrap@mb.invalid'
     secret = secrets.token_urlsafe(32)
-    setup = subprocess.run(cmd + ['superuser', 'upsert', admin_id, secret],
+    setup = subprocess.run(cmd + ['superuser', 'upsert', '--', admin_id, secret],
                            stdout=subprocess.DEVNULL)
     if setup.returncode:
         raise RuntimeError('PocketBase bootstrap failed')
