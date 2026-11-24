@@ -25,10 +25,12 @@ mb sync pull 1
 发布时先同步工作区，然后保存 round。示例使用虚构数据：
 
 ```sh
-mb publish round1 --json '{"plans":["Plan-A"],"scenario":"测试负载","change":"启用方案 A","result":{"score":110,"summary":"相同负载下从 100 提升至 110，功能复核通过。"}}'
+mb publish round1 --json '{"plans":["Plan-A"],"scenario":"测试负载","change":"启用方案 A","result":{"qualified":true,"score":110,"summary":"相同负载下从 100 提升至 110，延迟达标。"}}'
 ```
 
 `result.score` 填本榜单口径下的绝对实测值；可选 `paths` 为相对于来源工作区的路径。`--json -` 从标准输入读取。`mb retract <round>` 撤销本 rank 的发布。`mb sync push` 单独更新工作区，`mb sync pull` 下载全部上榜实验的最近一次完整工作区。
+
+有准入门槛时，用 `result.qualified` 标明测点是否达标。`mb rank` 为每个 rank 选择代表 round，再对各 rank 排序。两步都优先达标记录，组内按榜单方向比较 `score`。未标明状态的记录在榜单上返回 `qualified: null`，与未达标记录同组。
 
 ## 服务端
 

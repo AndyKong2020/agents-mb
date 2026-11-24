@@ -89,8 +89,11 @@ class BoardIntegration(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0, proc.stdout)
         return json.loads(proc.stdout) if proc.stdout.strip() else None
 
-    def publish(self, rank, rnd, score):
-        return self.mb(rank, "publish", rnd, "--json", json.dumps(payload(score)))
+    def publish(self, rank, rnd, score, qualified=None):
+        record = payload(score)
+        if qualified is not None:
+            record["result"]["qualified"] = qualified
+        return self.mb(rank, "publish", rnd, "--json", json.dumps(record))
 
     def test_publication_lifecycle(self):
         self.assertEqual(self.mb(1, "rank")["items"], [])
@@ -102,7 +105,8 @@ class BoardIntegration(unittest.TestCase):
         self.mb(1, "publish", "r2", "--json", json.dumps(payload(99)), ok=False)
         self.publish(2, "r1", 100)
         page = self.mb(2, "rank", "--limit", "1")
-        self.assertEqual(page["items"], [{"position": 1, "rank": 1, "score": 110, "round": "r2"}])
+        self.assertEqual(page["items"], [{"position": 1, "rank": 1, "score": 110, "round": "r2",
+                                          "qualified": None}])
         tail = self.mb(2, "rank", "--limit", "1", "--cursor", page["next_cursor"])
         self.assertEqual(tail["items"][0]["rank"], 2)
         self.assertFalse(tail.get("next_cursor"))
@@ -186,11 +190,33 @@ class BoardIntegration(unittest.TestCase):
         self.assertEqual([r["rank"] for r in partial if "error" in r], [11])
         self.assertEqual((dest / "1/rank.txt").read_text(), "updated")
 
+    def test_qualified_rank(self):
+        self.publish(1, "r1", 6000, False)
+        self.publish(1, "r2", 4200, True)
+        self.publish(1, "r3", 3100, True)
+        self.publish(2, "r1", 4500, True)
+        self.publish(3, "r1", 6500, False)
+        self.publish(3, "r2", 3000, False)
+        self.publish(4, "r1", 7000)
+        first = self.mb(1, "rank", "--limit", "3")
+        last = self.mb(1, "rank", "--cursor", first["next_cursor"])
+        self.assertEqual([(r["rank"], r["round"], r["score"], r["qualified"])
+                          for r in first["items"] + last["items"]],
+                         [(2, "r1", 4500, True), (1, "r2", 4200, True),
+                          (4, "r1", 7000, None), (3, "r1", 6500, False)])
+        self.mb(1, "retract", "r2")
+        self.assertEqual(self.mb(1, "rank")["items"][1]["round"], "r3")
+        self.mb(1, "retract", "r3")
+        self.assertEqual(self.mb(1, "rank")["items"][-1]["score"], 6000)
+
     def test_direction_min(self):
-        self.publish(1, "r1", 5)
-        self.publish(1, "r2", 15)
-        self.publish(2, "r1", 10)
-        self.assertEqual([r["score"] for r in self.mb(1, "rank")["items"]], [5, 10])
+        self.publish(1, "r1", 5, True)
+        self.publish(1, "r2", 15, True)
+        self.publish(1, "r3", 1, False)
+        self.publish(2, "r1", 10, True)
+        self.publish(3, "r1", 2, False)
+        self.publish(4, "r1", 3, False)
+        self.assertEqual([r["score"] for r in self.mb(1, "rank")["items"]], [5, 10, 2, 3])
 
     def test_concurrent_retry_of_one_publication(self):
         with concurrent.futures.ThreadPoolExecutor(4) as pool:

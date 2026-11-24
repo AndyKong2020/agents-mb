@@ -174,7 +174,8 @@ class Handler(BaseHTTPRequestHandler):
         direction = self.server.direction
         if rank is None:
             path = 'collections/leaders_' + direction + '/records'
-            params = {'sort': ('-' if direction == 'max' else '') + 'score,rank'}
+            score_order = '-score' if direction == 'max' else 'score'
+            params = {'sort': f'-meets_gate,{score_order},rank'}
         else:
             path = POSTS
             params = {'sort': '-created,-id', 'filter': f'rank = {rank}'}
@@ -192,7 +193,8 @@ class Handler(BaseHTTPRequestHandler):
             page += 1
             skip = 0
         if rank is None:
-            rows = [dict(position=i, rank=item['rank'], score=item['score'], round=item['round'])
+            rows = [dict(position=i, rank=item['rank'], score=item['score'], round=item['round'],
+                         qualified=item['payload']['result'].get('qualified'))
                     for i, item in enumerate(items, offset + 1)]
         else:
             rows = [dict(round=item['round'], plans=item['payload']['plans'], score=item['score'],

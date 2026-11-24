@@ -19,6 +19,8 @@ def validate_payload(payload):
     score = result.get("score")
     if type(score) not in (float, int) or not math.isfinite(score):
         raise ValueError("result.score must be a finite number")
+    if "qualified" in result and not isinstance(result["qualified"], bool):
+        raise ValueError("result.qualified must be a boolean")
     paths = payload.get("paths", [])
     if not isinstance(paths, list) or not all(
         isinstance(p, str) and not PurePosixPath(p).is_absolute()
