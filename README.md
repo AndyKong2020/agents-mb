@@ -1,61 +1,70 @@
 # agents-mb
 
-并行实验的成果榜单和工作区同步工具。每个实验使用稳定的 rank 编号发布 round，客户端按测量成绩查榜、查看发布记录和拉取其他实验的工作区。
+`mb` 提供记录发布、按分数排名和目录同步。每个客户端使用一个 `rank` 登录，同一客户端的发布记录通过 `round` 区分。
 
 ## 客户端
 
-实验容器提供 Python 3。克隆仓库后可直接运行 CLI，也可将 `mb`、`payload.py`、`sync_client.py` 复制到同一个 PATH 目录。
+客户端使用 Python 3 标准库。在仓库根目录运行 `./mb --help` 查看命令。独立安装时，将 `mb`、`payload.py` 和 `sync_client.py` 放在同一个已加入 `PATH` 的目录，并随包提供 [LICENSE](LICENSE)。
+
+在仓库根目录打包当前提交的客户端。
 
 ```sh
-git clone https://github.com/AndyKong2020/agents-mb.git
-cd agents-mb
-./mb --help
-export PATH="$PWD:$PATH"
+mkdir -p dist
+git archive --format=tar.gz -o dist/mb-client.tar.gz HEAD -- mb payload.py sync_client.py LICENSE
 ```
 
-启动实验时注入 `MB_URL`、`MB_RANK`、`MB_PASSWORD`。工作区默认为 `/workspace`，同步缓存根目录默认为 `/board-cache`，可分别设置 `MB_WORKSPACE` 和 `MB_CACHE_DIR`。两个目录须互不包含。
+| 环境变量 | 用途 |
+|---|---|
+| `MB_URL` | 服务地址 |
+| `MB_RANK`、`MB_PASSWORD` | 当前客户端的编号和登录凭据 |
+| `MB_WORKSPACE` | 允许同步给其他客户端的目录，默认 `/workspace` |
+| `MB_CACHE_DIR` | 接收同步文件的目录，默认 `/board-cache`，与共享目录互不包含 |
 
 ```sh
+mb publish r1 --json '{"plans":["A"],"scenario":"sample","change":"A","result":{"score":1,"summary":"sample"}}'
 mb rank --limit 3
-mb posts 1
-mb posts 1 round1
-mb sync pull 1
+mb posts 1 r1
+mb retract r1
 ```
 
-发布时先同步工作区，然后保存 round。示例使用虚构数据：
+`publish` 先同步整个 `MB_WORKSPACE`，再创建发布记录。`paths` 是记录引用的相对路径。`--json -` 从标准输入读取。撤销只移除发布记录，已同步的文件仍可读取。
+
+`result.score` 是排名分数。可选的 `result.qualified` 为 `true` 时优先排序。服务先选出各 rank 的最佳记录，再按同一规则排列各 rank。分数比较方向由服务端的 `MB_DIRECTION` 设置。
 
 ```sh
-mb publish round1 --json '{"plans":["Plan-A"],"scenario":"测试负载","change":"启用方案 A","result":{"qualified":true,"score":110,"summary":"相同负载下从 100 提升至 110，延迟达标。"}}'
+mb sync push
+mb sync pull 1
+mb sync pull
 ```
 
-`result.score` 填本榜单口径下的绝对实测值；可选 `paths` 为相对于来源工作区的路径。`--json -` 从标准输入读取。`mb retract <round>` 撤销本 rank 的发布。`mb sync push` 单独更新工作区，`mb sync pull` 下载全部上榜实验的最近一次完整工作区。
-
-有准入门槛时，用 `result.qualified` 标明测点是否达标。`mb rank` 为每个 rank 选择代表 round，再对各 rank 排序。两步都优先达标记录，组内按榜单方向比较 `score`。未标明状态的记录在榜单上返回 `qualified: null`，与未达标记录同组。
+`pull` 将指定 rank 最近一次同步的目录下载到本地缓存。省略 rank 时下载全部上榜 rank 的目录。
 
 ## 服务端
 
-在仓库根目录构建镜像。arm64 主机可将平台和标签中的 `amd64` 换为 `arm64`。Dockerfile 在构建时下载 PocketBase 0.40.6 并校验 SHA-256。用 `docker save` / `docker load` 分发镜像，运行时可离线启动。
+在仓库根目录构建镜像。目标架构可选 `linux/amd64` 或 `linux/arm64`。
 
 ```sh
-docker buildx build --load --platform linux/amd64 -t mb-board:0.1-amd64 .
+docker buildx build --load --platform linux/amd64 -t mb-board:local .
 ```
 
-服务管理员在仓库与实验工作区之外准备凭据文件，格式为 `{"1":"<该 rank 的随机凭据>"}`。实验容器加入相同的网络，分别注入各自的凭据。
+在共享目录之外创建私有的账号 JSON 文件，将 rank 映射到各自的密码，例如 `{"1":"<password>"}`。将下列挂载的源路径替换为该文件的绝对路径。
 
 ```sh
 docker network create mb-net
-docker run -d --pull=never --name experiment-board --network mb-net \
+docker run -d --pull=never --name mb-board --network mb-net \
   -v mb-board-data:/data \
   -v /absolute/path/to/accounts.json:/run/secrets/accounts.json:ro \
   -e MB_ACCOUNTS_FILE=/run/secrets/accounts.json \
   -e MB_DIRECTION=max \
-  mb-board:0.1-amd64
+  mb-board:local
 ```
 
-同网络客户端使用 `MB_URL=http://experiment-board:8090`。一个服务实例对应一种测量口径。越高越好的指标使用 `max`，越低越好的指标使用 `min`。
+同网络的客户端使用 `MB_URL=http://mb-board:8090`。`MB_DIRECTION` 支持 `max` 和 `min`。
+
+镜像在 `/usr/share/licenses/agents-mb/` 和 `/usr/share/licenses/pocketbase/` 分别保留 mb 和 PocketBase 的许可证。分发完整镜像时还应核对所含依赖的声明和对应源码要求，包括基础镜像中的 BusyBox。[PocketBase 0.40.6 许可证](https://github.com/pocketbase/pocketbase/blob/v0.40.6/LICENSE.md) · [BusyBox 许可证](https://busybox.net/license.html)
 
 ## 测试
 
 ```sh
-MB_TEST_IMAGE=mb-board:0.1-amd64 python3 -m unittest discover -s tests -v
+MB_TEST_IMAGE=mb-board:local python3 -m unittest discover -s tests -v
 ```

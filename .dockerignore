@@ -1,5 +1,8 @@
 *
 !Dockerfile
+!LICENSE
+!licenses/
+!licenses/PocketBase-MIT.txt
 !mb
 !payload.py
 !server.py

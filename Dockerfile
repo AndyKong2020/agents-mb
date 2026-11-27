@@ -19,6 +19,8 @@ RUN case "$TARGETARCH" in \
 
 FROM ${PYTHON_IMAGE}
 COPY --from=extract /usr/local/bin/pocketbase /usr/local/bin/pocketbase
+COPY LICENSE /usr/share/licenses/agents-mb/LICENSE
+COPY licenses/PocketBase-MIT.txt /usr/share/licenses/pocketbase/LICENSE
 WORKDIR /opt/mb
 COPY mb server.py sync_server.py sync_client.py payload.py ./
 COPY pb_migrations/ ./pb_migrations/
